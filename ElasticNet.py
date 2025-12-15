@@ -17,7 +17,6 @@ TARGET = "satisfaction"
 
 # ---- selection policy (not aggressive)
 TOP_CORR = 4500          # large prefilter (your current X has 5532 cols)
-SAMPLE_ROWS = 40000      # fit faster; increase to 60000 if ok
 RANDOM_STATE = 42
 
 # ---- elasticnet "soft" (close to Ridge)
@@ -73,19 +72,10 @@ def main():
     kept = [c for c, _ in corrs[:min(TOP_CORR, len(corrs))]]
     print(f"Kept after corr filter: {len(kept)}")
 
-    # ---- sample rows for speed
-    n = Xn.height
-    if SAMPLE_ROWS is not None and SAMPLE_ROWS < n:
-        rng = np.random.default_rng(RANDOM_STATE)
-        idx = rng.choice(n, size=SAMPLE_ROWS, replace=False)
-        idx.sort()
-        X_fit = Xn.select(kept).to_numpy()[idx]
-        y_fit = y[idx]
-        print(f"Fitting on sample rows: {SAMPLE_ROWS}/{n}")
-    else:
-        X_fit = Xn.select(kept).to_numpy()
-        y_fit = y
-        print(f"Fitting on full rows: {n}")
+    # ---- use ALL rows (no sampling)
+    X_fit = Xn.select(kept).to_numpy()
+    y_fit = y
+    print(f"Fitting on full rows: {X_fit.shape[0]}")
 
     # ---- standardize
     scaler = StandardScaler()
