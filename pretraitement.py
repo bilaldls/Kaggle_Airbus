@@ -1,23 +1,37 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 from pathlib import Path
 
-TRAIN_PATH = Path("data/train.csv")
-TEST_PATH  = Path("data/test.csv")
+# =========================
+# Paths / config
+# =========================
+DATA = Path("data")
+TRAIN_PATH = DATA / "train.csv"
+TEST_PATH  = DATA / "test.csv"
+
+OUT_DIR = DATA
+OUT_DIR.mkdir(exist_ok=True)
 
 TARGETS = ["wip", "investissement", "satisfaction"]
 ID_COL = "id"
 
-CORR_THRESHOLD = 0.95   # seuil de colinéarité
-BLOCK_SIZE = 500        # taille de bloc pour corrélation
+CORR_THRESHOLD = 0.95
+BLOCK_SIZE = 500
+NEAR_CONSTANT_THRESHOLD = 1
 
-# ---------------------------------------------------
+COL_TXT = DATA / "columns_kept.txt"
+COL_CSV = DATA / "columns_kept.csv"
+
+XTRAIN_OUT = DATA / "X_train_clean.parquet"
+XTEST_OUT  = DATA / "X_test_clean.parquet"
+YTRAIN_OUT = DATA / "y_train.parquet"
+
+
+# =========================
 # Utils
-# ---------------------------------------------------
-
+# =========================
 def optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
         s = df[col]
@@ -32,15 +46,10 @@ def drop_useless_columns(
     df: pd.DataFrame,
     *,
     exclude: set[str],
-    near_constant_threshold: float = 0.999
+    near_constant_threshold: float
 ) -> tuple[pd.DataFrame, dict]:
 
-    info = {
-        "all_missing": [],
-        "constant": [],
-        "near_constant": [],
-    }
-
+    info = {"all_missing": [], "constant": [], "near_constant": []}
     cols = [c for c in df.columns if c not in exclude]
 
     # all missing
@@ -60,9 +69,10 @@ def drop_useless_columns(
 
     # near constant
     near_constant = []
+    n = len(df)
     for c in cols:
         vc = df[c].value_counts(dropna=False)
-        if len(vc) > 0 and vc.iloc[0] / len(df) >= near_constant_threshold:
+        if len(vc) > 0 and (vc.iloc[0] / n) >= near_constant_threshold:
             near_constant.append(c)
 
     df = df.drop(columns=near_constant)
@@ -75,29 +85,22 @@ def drop_collinear_features(
     df: pd.DataFrame,
     *,
     exclude: set[str],
-    threshold: float = 0.95,
-    block_size: int = 500
+    threshold: float,
+    block_size: int
 ) -> tuple[pd.DataFrame, list[str]]:
-    """
-    Supprime les colonnes numériques fortement colinéaires.
-    - id est EXCLU explicitement
-    - garde une seule colonne par groupe colinéaire
-    """
 
     numeric_cols = [
         c for c in df.columns
         if (
             c not in exclude
-            and c != ID_COL                # sécurité explicite
+            and c != ID_COL
             and pd.api.types.is_numeric_dtype(df[c])
         )
     ]
 
     print(f"\n[Collinearity] Analysing {len(numeric_cols)} numeric columns...")
-
     to_drop = set()
 
-    # Remplacer NaN → médiane (nécessaire pour corrcoef)
     work_df = df[numeric_cols].copy()
     work_df = work_df.fillna(work_df.median(numeric_only=True))
 
@@ -109,71 +112,83 @@ def drop_collinear_features(
             block_j = numeric_cols[j:j + block_size]
             data_j = work_df[block_j].values.T
 
-            corr = np.abs(
-                np.corrcoef(data_i, data_j)[:len(block_i), len(block_i):]
-            )
+            corr = np.abs(np.corrcoef(data_i, data_j)[:len(block_i), len(block_i):])
 
             for idx_i, col_i in enumerate(block_i):
                 if col_i in to_drop:
                     continue
-
                 for idx_j, col_j in enumerate(block_j):
                     if col_j in to_drop:
                         continue
-
                     if corr[idx_i, idx_j] >= threshold:
                         to_drop.add(col_j)
 
     df = df.drop(columns=list(to_drop))
     return df, sorted(to_drop)
-# ---------------------------------------------------
-# Main
-# ---------------------------------------------------
 
+
+# =========================
+# Main
+# =========================
 def main():
-    print("=== Loading train.csv ===")
+    print("=== Load train.csv ===")
     train = pd.read_csv(TRAIN_PATH)
-    print(f"Raw train shape: {train.shape}")
+    test = pd.read_csv(TEST_PATH)
 
     train = optimize_dtypes(train)
+    test  = optimize_dtypes(test)
 
     exclude = set(TARGETS + [ID_COL])
 
-    # Step 1a — cheap cleaning
-    train, drop_info = drop_useless_columns(train, exclude=exclude)
+    # ---------- Train-only preprocessing ----------
+    train_clean, drop_info = drop_useless_columns(
+        train, exclude=exclude, near_constant_threshold=NEAR_CONSTANT_THRESHOLD
+    )
 
     print("\n=== Cheap cleaning summary ===")
     for k, v in drop_info.items():
         print(f"{k}: {len(v)}")
 
-    print(f"After cheap cleaning: {train.shape}")
-
-    # Step 1b — collinearity
-    train, dropped_collinear = drop_collinear_features(
-        train,
+    train_clean, dropped_collinear = drop_collinear_features(
+        train_clean,
         exclude=exclude,
         threshold=CORR_THRESHOLD,
         block_size=BLOCK_SIZE
     )
 
-    print(f"\n[Collinearity] Dropped columns: {len(dropped_collinear)}")
-    print(f"After collinearity: {train.shape}")
+    print(f"[Collinearity] Dropped: {len(dropped_collinear)}")
 
-    # Split
-    y = train[TARGETS].copy()
-    X = train.drop(columns=TARGETS)
+    # ---------- Build feature list ----------
+    feature_cols = [c for c in train_clean.columns if c not in exclude and c != ID_COL]
+    print(f"\nKept features: {len(feature_cols)}")
 
-    print("\n=== Memory report ===")
-    mem_mb = train.memory_usage(deep=True).sum() / (1024 ** 2)
-    print(f"train memory: {mem_mb:.1f} MB")
+    # ---------- Save columns ----------
+    COL_TXT.write_text("\n".join(feature_cols), encoding="utf-8")
+    pd.Series(feature_cols, name="feature").to_csv(COL_CSV, index=False)
 
-    out_dir = Path("artifacts")
-    out_dir.mkdir(exist_ok=True)
+    print(f"Saved column list:")
+    print(f" - {COL_TXT}")
+    print(f" - {COL_CSV}")
 
-    X.to_parquet(out_dir / "X_train_clean.parquet", index=False)
-    y.to_parquet(out_dir / "y_train.parquet", index=False)
+    # ---------- Build final datasets ----------
+    X_train = train_clean[feature_cols]
+    y_train = train_clean[TARGETS]
 
-    print("\nSaved cleaned train datasets")
+    X_test = test.copy()
+    X_test = X_test[feature_cols]  # same columns, same order
+
+    # ---------- Save datasets ----------
+    X_train.to_parquet(XTRAIN_OUT, index=False)
+    X_test.to_parquet(XTEST_OUT, index=False)
+    y_train.to_parquet(YTRAIN_OUT, index=False)
+
+    print("\nSaved datasets:")
+    print(f" - {XTRAIN_OUT}")
+    print(f" - {XTEST_OUT}")
+    print(f" - {YTRAIN_OUT}")
+
+    print("\n✅ Preprocessing finished successfully.")
+
 
 if __name__ == "__main__":
     main()
