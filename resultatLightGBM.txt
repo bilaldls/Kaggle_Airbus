@@ -1,0 +1,42 @@
+leovasseur@MacBook-Air-de-Leo Hackathon % python3 src/Modele/LightGBM.py
+=== Load X / y ===
+⚠️ Found 'id' in X -> dropping it for training.
+X shape: (76905, 5528) | y shape: (76905,)
+
+==============================
+=== Phase 1 | objective = L2 ===
+[Fold 1] best_iter=2396 | acc@0.05(raw)=0.7710
+[Fold 2] best_iter=2229 | acc@0.05(raw)=0.7598
+[Fold 3] best_iter=2283 | acc@0.05(raw)=0.7518
+[Fold 4] best_iter=1628 | acc@0.05(raw)=0.7646
+[Fold 5] best_iter=1555 | acc@0.05(raw)=0.7581
+
+--- OOF summary ---
+OOF acc@0.05 (raw clipped) : 0.7611
+Best global shift          : +0.00325
+OOF acc@0.05 (after shift) : 0.7617
+Fold acc mean/std          : 0.7611 / 0.0065
+Mean best_iter             : 2018
+
+==============================
+=== Phase 1 | objective = HUBER ===
+[Fold 1] best_iter=2396 | acc@0.05(raw)=0.7710
+[Fold 2] best_iter=2229 | acc@0.05(raw)=0.7598
+[Fold 3] best_iter=3183 | acc@0.05(raw)=0.7540
+[Fold 4] best_iter=1628 | acc@0.05(raw)=0.7646
+[Fold 5] best_iter=1555 | acc@0.05(raw)=0.7581
+
+--- OOF summary ---
+OOF acc@0.05 (raw clipped) : 0.7615
+Best global shift          : +0.00000
+OOF acc@0.05 (after shift) : 0.7615
+Fold acc mean/std          : 0.7615 / 0.0059
+Mean best_iter             : 2198
+
+==============================
+=== PHASE 1 RESULT ===
+    l2 | raw=0.7611 | shifted=0.7617 | shift=+0.00325 | mean_iter=2018
+ huber | raw=0.7615 | shifted=0.7615 | shift=+0.00000 | mean_iter=2198
+
+✅ Best objective: l2
+✅ Best OOF acc@0.05(after shift): 0.7617
