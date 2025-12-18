@@ -1,0 +1,9 @@
+import pandas as pd
+
+y = pd.read_parquet("data/y_train.parquet")
+
+targets = ["wip", "investissement", "satisfaction"]
+
+corr = y[targets].corr(method="pearson")
+
+print(corr)
